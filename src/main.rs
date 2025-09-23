@@ -1,4 +1,5 @@
 use clap::Parser;
+use ldap3::LdapConnSettings;
 use ldap3::{result::Result, LdapConn, Scope, SearchEntry};
 use colored::*;
 
@@ -111,11 +112,24 @@ fn lookup_domain_controllers(nameserver: &str, domain: &str) -> Vec<String> {
     
 }
 
-fn check_signing_requirement(target: &str, user_string: &str, password: &str) -> Result<ldap3::LdapResult> {
+fn perform_simple_bind(target: &str, user_string: &str, password: &str) -> Result<ldap3::LdapResult> {
     let ldap_address = format!("ldap://{}", target);
 
     let mut ldap = LdapConn::new(&ldap_address)?;
     let bind_result = ldap.simple_bind(&user_string, &password)?;
+    ldap.unbind()?;
+
+    Ok(bind_result)
+}
+
+fn perform_ntlm_bind(target: &str, user_string: &str, password: &str, cbt_state: ldap3::CBT) -> Result<ldap3::LdapResult> {    
+    let ldap_address = format!("ldaps://{}", target);
+
+    let settings = LdapConnSettings::new().set_no_tls_verify(true);
+    let mut ldap = LdapConn::with_settings(settings, &ldap_address)?;
+
+    //let mut ldap = LdapConn::new(&ldap_address)?;
+    let bind_result = ldap.sasl_ntlm_bind(&user_string, &password, cbt_state)?;
     ldap.unbind()?;
 
     Ok(bind_result)
@@ -171,10 +185,10 @@ fn main() -> Result<()> {
         let signing_status = if failed_auth {
             "Aborted".to_string()
         } else {
-            let ldap_result = check_signing_requirement(&dc, &user_string, &args.password)?;
+            let ldap_result = perform_simple_bind(&dc, &user_string, &args.password)?;
             match ldap_result.rc {          
-                0 => "Signing NOT required".red().to_string(),
-                8 => "Signing required".green().to_string(),
+                0 => "Not required".red().to_string(),
+                8 => "Required".green().to_string(),
                 49 => {
                     failed_auth = true;
                     "Invalid credentials, aborting tests".yellow().bold().to_string()
@@ -186,7 +200,18 @@ fn main() -> Result<()> {
         let channel_binding_status = if failed_auth {
             "Aborted".to_string()
         } else {
-            "Not implemented".to_string()
+            let no_token_result = perform_ntlm_bind(&dc, &user_string, &args.password, ldap3::CBT::None)?;
+            match no_token_result.text.contains("data 80090346") {
+                false => {
+                    // ntlm bind without token accepted. Perform another bind with malformed token to determine if "When supported" or "Never"
+                    let invalid_token_result = perform_ntlm_bind(&dc, &user_string, &args.password, ldap3::CBT::Invalid)?;
+                    match invalid_token_result.text.contains("data 80090346") {
+                        true => "When supported".red().to_string(),
+                        false => "Never".red().to_string()
+                    }
+                },
+                true => "Always".green().to_string()
+            }
         };
 
         println!("{}: Signing = {} | Channel Binding = {}", dc.bold(), signing_status, channel_binding_status);
