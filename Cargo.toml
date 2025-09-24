@@ -4,3 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+clap = { version = "4.5.45", features = ["derive"] }
+colored = "3.0.0"
+hickory-proto = "0.25.2"
+hickory-resolver = "0.25.2"
+ldap3 = { version = "0.12.1", features = ["ntlm"] }
+tokio = "1.47.1"
+
+[patch.crates-io]
+ldap3 = { git = "https://github.com/rewks/ldap3.git" }
+
+[profile.release]
+lto = true
+strip = "symbols"
+codegen-units = 1
