@@ -9,7 +9,7 @@ use hickory_resolver::name_server::TokioConnectionProvider;
 use hickory_resolver::config::{NameServerConfig, ResolverConfig};
 
 #[derive(Parser, Debug)]
-#[command(name = "LdapSecCheck")]
+#[command(name = "ldap-sec-check")]
 #[command(version = "0.1.0")]
 #[command(about = "Checks if domain controllers require LDAP signing or channel binding", long_about = None)]
 struct Args {

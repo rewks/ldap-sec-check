@@ -43,7 +43,7 @@ dc02.corp.local: Signing = Required | Channel Binding = When supported
 Either grab a pre-build binary for your system from the releases page or clone the repository and build with cargo:
 
 ```
-git clone https://github.com/rewks/LdapSecCheck.git
-cd LdapSecCheck
+git clone https://github.com/rewks/ldap-sec-check.git
+cd ldap-sec-check
 cargo build --release
 ```
