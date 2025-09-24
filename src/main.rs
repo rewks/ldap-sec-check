@@ -1,15 +1,12 @@
 use clap::Parser;
-use ldap3::LdapConnSettings;
-use ldap3::{result::Result, LdapConn, Scope, SearchEntry};
-use colored::*;
+use colored::{Colorize};
 
-use std::net::ToSocketAddrs;
-
-use std::net::*;
+use std::net::{IpAddr, ToSocketAddrs};
+use ldap3::{result::Result, LdapConn, LdapConnSettings, Scope, SearchEntry};
 use tokio::runtime::Runtime;
 use hickory_resolver::Resolver;
 use hickory_resolver::name_server::TokioConnectionProvider;
-use hickory_resolver::config::*;
+use hickory_resolver::config::{NameServerConfig, ResolverConfig};
 
 #[derive(Parser, Debug)]
 #[command(name = "LdapSecCheck")]
@@ -22,18 +19,17 @@ struct Args {
     #[arg(short, long)]
     password: String,
 
-    #[arg(short, long)]
+    #[arg(short, long, help = "IP address or fully qualified name of target domain controller")]
     target: String,
 
-    #[arg(short, long, help = "Find and test all domain controllers")]
+    #[arg(short, long, help = "Lookup and test all domain controllers")]
     all: bool,
     
-    #[arg(short, long, value_name = "FQDN")]
+    #[arg(short, long, value_name = "FQDN", help = "Fully qualified domain name (required only if anonymous bind fails)")]
     domain: Option<String>,
 }
 
 fn get_domain_through_anonymous_bind(ldap_server: &String) -> Result<Option<String>> {
-    println!("Performing anonymous bind to {} to enumerate domain's distinguished name", ldap_server);
     let ldap_address = format!("ldap://{}", ldap_server);
 
     let mut ldap = LdapConn::new(&ldap_address)?;
@@ -74,7 +70,6 @@ fn dn_to_fqdn(distinguished_name: &str) -> String {
 }
 
 fn lookup_domain_controllers(nameserver: &str, domain: &str) -> Vec<String> {
-    // Tokio Runtime to run the resolver
     let io_loop = Runtime::new().unwrap();
 
     let nameserver_ip = nameserver.parse::<IpAddr>().unwrap();
@@ -100,7 +95,7 @@ fn lookup_domain_controllers(nameserver: &str, domain: &str) -> Vec<String> {
     let lookup_future = resolver.srv_lookup(&srv_record);
 
     // Run the lookup until it resolves or errors
-    let response = io_loop.block_on(lookup_future).unwrap(); // need to handle errors from incorrect domains better
+    let response = io_loop.block_on(lookup_future).unwrap(); // this panics if provided domain is incorrect, need to handle this better
 
     let mut domain_controllers: Vec<String> = response
         .iter()
@@ -128,7 +123,6 @@ fn perform_ntlm_bind(target: &str, user_string: &str, password: &str, cbt_state:
     let settings = LdapConnSettings::new().set_no_tls_verify(true);
     let mut ldap = LdapConn::with_settings(settings, &ldap_address)?;
 
-    //let mut ldap = LdapConn::new(&ldap_address)?;
     let bind_result = ldap.sasl_ntlm_bind(&user_string, &password, cbt_state)?;
     ldap.unbind()?;
 
@@ -172,6 +166,9 @@ fn main() -> Result<()> {
     };
 
     let user_string = format!("{}@{}", args.username, fqdn);
+
+    println!("Domain: {}", fqdn);
+    println!("User: {}\n", user_string);
     
     let domain_controllers = match args.all {
         true => lookup_domain_controllers(&target_ip, &fqdn),
@@ -203,7 +200,7 @@ fn main() -> Result<()> {
             let no_token_result = perform_ntlm_bind(&dc, &user_string, &args.password, ldap3::CBT::None)?;
             match no_token_result.text.contains("data 80090346") {
                 false => {
-                    // ntlm bind without token accepted. Perform another bind with malformed token to determine if "When supported" or "Never"
+                    // Bind without token accepted. Perform another bind with malformed token to determine if "When supported" or "Never"
                     let invalid_token_result = perform_ntlm_bind(&dc, &user_string, &args.password, ldap3::CBT::Invalid)?;
                     match invalid_token_result.text.contains("data 80090346") {
                         true => "When supported".red().to_string(),
