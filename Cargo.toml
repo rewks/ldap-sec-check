@@ -13,3 +13,8 @@ tokio = "1.47.1"
 
 [patch.crates-io]
 ldap3 = { git = "https://github.com/rewks/ldap3.git" }
+
+[profile.release]
+lto = true
+strip = "symbols"
+codegen-units = 1
