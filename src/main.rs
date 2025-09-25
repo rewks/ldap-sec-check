@@ -182,33 +182,41 @@ fn main() -> Result<()> {
         let signing_status = if failed_auth {
             "Aborted".to_string()
         } else {
-            let ldap_result = perform_simple_bind(&dc, &user_string, &args.password)?;
-            match ldap_result.rc {          
-                0 => "Not required".red().to_string(),
-                8 => "Required".green().to_string(),
-                49 => {
-                    failed_auth = true;
-                    "Invalid credentials, aborting tests".yellow().bold().to_string()
+            match perform_simple_bind(&dc, &user_string, &args.password) {
+                Ok(ldap_result) => {
+                    match ldap_result.rc {          
+                        0 => "Not required".red().to_string(),
+                        8 => "Required".green().to_string(),
+                        49 => {
+                            failed_auth = true;
+                            "Invalid credentials, aborting tests".yellow().bold().to_string()
+                        },
+                        _ => ldap_result.text
+                    }
                 },
-                _ => ldap_result.text
+                Err(error) => format!("LDAP unavailable [{}]", error)
             }
         };
 
         let channel_binding_status = if failed_auth {
             "Aborted".to_string()
         } else {
-            let no_token_result = perform_ntlm_bind(&dc, &user_string, &args.password, ldap3::CBT::None)?;
-            match no_token_result.text.contains("data 80090346") {
-                false => {
-                    // Bind without token accepted. Perform another bind with malformed token to determine if "When supported" or "Never"
-                    let invalid_token_result = perform_ntlm_bind(&dc, &user_string, &args.password, ldap3::CBT::Invalid)?;
-                    match invalid_token_result.text.contains("data 80090346") {
-                        true => "When supported".red().to_string(),
-                        false => "Never".red().to_string()
+            match perform_ntlm_bind(&dc, &user_string, &args.password, ldap3::CBT::None) {
+                Ok(no_token_res) => {
+                    match no_token_res.text.contains("data 80090346") {
+                        false => {
+                            // Bind without token accepted. Perform another bind with malformed token to determine if policy is "When supported" or "Never"
+                            let invalid_token_result = perform_ntlm_bind(&dc, &user_string, &args.password, ldap3::CBT::Invalid)?;
+                            match invalid_token_result.text.contains("data 80090346") {
+                                true => "When supported".red().to_string(),
+                                false => "Never".red().to_string()
+                            }
+                        },
+                        true => "Always".green().to_string()
                     }
                 },
-                true => "Always".green().to_string()
-            }
+                Err(error) => format!("LDAPS unavailable [{}]", error)
+            }    
         };
 
         println!("{}: Signing = {} | Channel Binding = {}", dc.bold(), signing_status, channel_binding_status);
